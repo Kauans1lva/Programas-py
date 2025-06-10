@@ -1,5 +1,5 @@
-# Projeto experimental do Kauan
+# Redução de trabalhos manuais com Python
 
-aqui é um teste de um projeto de trabalho
+Repositório de programas que possuem o intuito de otimizar trabalhos manuais utilizando programação.
 
 
