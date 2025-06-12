@@ -1,4 +1,4 @@
-# Redução de trabalhos manuais com e resolução de problemas com Python
+# Redução de trabalhos manuais e resolução de problemas com Python
 
 Repositório de programas que possuem o intuito de otimizar trabalhos manuais e resolver problemas utilizando programação.
 
