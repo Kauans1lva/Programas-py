@@ -1,0 +1,166 @@
+import os
+import re
+import pdfplumber
+
+def extrair_informacoes_pdf(caminho_arquivo):
+    """
+    Extrai a data de emissão, o nome do fornecedor e o número da nota fiscal de um arquivo PDF.
+    """
+    try:
+        with pdfplumber.open(caminho_arquivo) as pdf:
+            linhas_texto = []
+            for pagina in pdf.pages:
+                linhas_texto.extend(pagina.extract_text().splitlines())
+
+        nome_fornecedor = None
+        numero_nota = None
+        data_emissao = None
+
+        padroes_nota = [
+            r"(Número\s+da\s+NFS-e|NFS-e\s+Número|Número\s+da|NFS-e)"
+        ]
+        for i, linha in enumerate(linhas_texto):
+            for padrao in padroes_nota:
+                if re.search(padrao, linha, re.IGNORECASE):
+                    match_mesma_linha = re.search(r"(\d+)", linha)
+                    if match_mesma_linha:
+                        numero_encontrado = match_mesma_linha.group(1)
+                        if len(numero_encontrado) <= 20:
+                            numero_nota = numero_encontrado
+                            break
+
+                    if i + 1 < len(linhas_texto):
+                        match_proxima_linha = re.search(r"(\d+)", linhas_texto[i + 1])
+                        if match_proxima_linha:
+                            numero_encontrado = match_proxima_linha.group(1)
+                            if len(numero_encontrado) <= 20:
+                                numero_nota = numero_encontrado
+                                break
+
+            if numero_nota:
+                break
+
+        if not numero_nota and len(linhas_texto) >= 8:
+            match_fallback_nota = re.search(r"(\d+)", linhas_texto[7])
+            if match_fallback_nota:
+                numero_encontrado = match_fallback_nota.group(1)
+                if len(numero_encontrado) <= 20:
+                    numero_nota = numero_encontrado
+
+        padroes_nome = [
+            r"(Nome\s*/\s*Nome Empresarial|Nome\s*/\s*Razão Social|Razão Social\s*/\s*Nome|Nome Fantasia)"
+        ]
+        for i, linha in enumerate(linhas_texto):
+            for padrao in padroes_nome:
+                if re.search(padrao, linha, re.IGNORECASE):
+                    match_mesma_linha = re.search(padroes_nome[0] + r"\s*[:\-]?\s*(.+)", linha, re.IGNORECASE)
+                    if match_mesma_linha:
+                        nome_fornecedor = match_mesma_linha.group(2).strip()
+
+                    if nome_fornecedor and ("E-mail" in nome_fornecedor or "Nome_NomeEmpresarial" in nome_fornecedor):
+                        if i + 1 < len(linhas_texto):
+                            nome_fornecedor = linhas_texto[i + 1].strip()
+
+                    if nome_fornecedor:
+                        break
+
+            if nome_fornecedor:
+                break
+
+        if not nome_fornecedor and len(linhas_texto) >= 14:
+            nome_fornecedor = linhas_texto[13].strip()
+
+        # 1️⃣ Capturar data da emissão (primeira ocorrência de dd/mm/aaaa)
+        for linha in linhas_texto:
+            match_data = re.search(r"\b(\d{2}/\d{2}/\d{4})\b", linha)
+            if match_data:
+                data_emissao = match_data.group(1)
+                break
+
+        # Ajuste solicitado: formatar para AA.MM.DD (dois dígitos do ano)
+        if data_emissao:
+            dia, mes, ano = data_emissao.split("/")
+            ano2 = ano[-2:]  # dois últimos dígitos do ano
+            data_emissao = f"{ano2}.{mes.zfill(2)}.{dia.zfill(2)}"  # formato AA.MM.DD
+        else:
+            data_emissao = "DATA_DESCONHECIDA"
+
+        if nome_fornecedor:
+            nome_fornecedor = re.sub(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", "", nome_fornecedor)
+            nome_fornecedor = re.sub(r"\s+", " ", nome_fornecedor).strip()
+
+        nome_fornecedor = nome_fornecedor if nome_fornecedor else "NOME_DESCONHECIDO"
+        nome_fornecedor = re.sub(r'[\\/:"*?<>|]', '_', nome_fornecedor)
+        nome_fornecedor = re.sub(r"(\d+)([A-Z])", r"\1 \2", nome_fornecedor)
+        nome_fornecedor = re.sub(r"([A-Z])([A-Z][a-z])", r"\1 \2", nome_fornecedor)
+        nome_fornecedor = re.sub(r"([a-z])([A-Z])", r"\1 \2", nome_fornecedor)
+
+        numero_nota = numero_nota if numero_nota else "NUMERO_DESCONHECIDO"
+
+        return data_emissao, nome_fornecedor, numero_nota
+
+    except Exception as e:
+        print(f"Erro ao processar o arquivo {caminho_arquivo}: {e}")
+        return None, None, None
+
+def renomear_arquivos_pdf(pasta):
+    """
+    Renomeia os arquivos PDF na pasta com base nas informações extraídas.
+    """
+    try:
+        arquivos = [f for f in os.listdir(pasta) if f.lower().endswith('.pdf')]
+        if not arquivos:
+            print("Nenhum arquivo PDF encontrado na pasta.")
+            return
+
+        print(f"\nRenomeando arquivos na pasta: {pasta}\n")
+        contador = 1
+
+        for arquivo in arquivos:
+            caminho_arquivo = os.path.join(pasta, arquivo)
+
+            data_emissao, nome_fornecedor, numero_nota = extrair_informacoes_pdf(caminho_arquivo)
+
+            if data_emissao and nome_fornecedor and numero_nota:
+                novo_nome = f"{data_emissao}_{nome_fornecedor}_NFS-e {numero_nota}.pdf"
+            else:
+                novo_nome = f"DESCONHECIDO_{contador}.pdf"
+                contador += 1
+
+            caminho_novo = os.path.join(pasta, novo_nome)
+
+            try:
+                os.rename(caminho_arquivo, caminho_novo)
+                print(f"Renomeado: {arquivo} -> {novo_nome}")
+            except FileExistsError:
+                print(f"Arquivo já existe: {novo_nome}. Pulei este arquivo.")
+
+        print("\nRenomeação concluída.")
+
+    except Exception as e:
+        with open("erros.log", "a") as log:
+            log.write(f"Erro ao renomear arquivos na pasta {pasta}: {e}\n")
+        print(f"Erro ao renomear arquivos: {e}")
+
+def iniciar_programa():
+    """
+    Inicia o programa com um menu interativo.
+    """
+    try:
+        pasta = input("\nDigite o caminho da pasta onde estão os PDFs: ").strip()
+        if not os.path.isdir(pasta):
+            print("Caminho da pasta inválido. Encerrando o programa.")
+            return
+
+        renomear_arquivos_pdf(pasta)
+
+    except Exception as e:
+        with open("erros.log", "a") as log:
+            log.write(f"Erro geral: {e}\n")
+        print(f"Erro inesperado: {e}")
+
+    finally:
+        input("\nPressione Enter para encerrar o programa...")
+
+if __name__ == "__main__":
+    iniciar_programa()
