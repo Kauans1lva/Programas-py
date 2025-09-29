@@ -1,0 +1,111 @@
+import os
+import re
+import pdfplumber
+
+def limpar_nome_arquivo(nome):
+    """
+    Remove caracteres especiais e substitui por '_' para garantir que o nome do arquivo seja válido.
+    """
+    # Remove caracteres inválidos para nomes de arquivos no Windows
+    nome = re.sub(r'[\\/:*?"<>|]', '_', nome)
+    return nome
+
+def extrair_informacoes_pdf(caminho_arquivo):
+    """
+    Extrai a data de pagamento, o destinatário e o valor do comprovante de um arquivo PDF.
+    """
+    try:
+        with pdfplumber.open(caminho_arquivo) as pdf:
+            linhas_texto = []
+            for pagina in pdf.pages:
+                linhas_texto.extend(pagina.extract_text().splitlines())
+
+        # Inicializar variáveis
+        data_pagamento = None
+        destinatario = None
+        valor = None
+
+        # Extrair a data de pagamento (linha 3)
+        if len(linhas_texto) >= 3:
+            match_data = re.search(r"(\d{2})/(\d{2})/(\d{4})", linhas_texto[2])
+            if match_data:
+                data_pagamento = f"{match_data.group(3)[2:]}.{match_data.group(2)}.{match_data.group(1)}"
+
+        # Extrair o destinatário (linha 9)
+        if len(linhas_texto) >= 9:
+            match_destinatario = re.search(r"Nome:\s*(.+)", linhas_texto[8])
+            if match_destinatario:
+                destinatario = match_destinatario.group(1).strip()
+
+        # Extrair o valor do comprovante (linha 17)
+        if len(linhas_texto) >= 17:
+            match_valor = re.search(r"R\$\s*([\d\.,]+)", linhas_texto[16])
+            if match_valor:
+                valor = match_valor.group(1).strip()
+
+        return data_pagamento, destinatario, valor
+    except Exception as e:
+        print(f"Erro ao processar o arquivo {caminho_arquivo}: {e}")
+        return None, None, None
+
+def renomear_comprovantes(pasta):
+    """
+    Renomeia os arquivos PDF na pasta com base nas informações extraídas.
+    """
+    try:
+        arquivos = [f for f in os.listdir(pasta) if f.lower().endswith('.pdf')]
+        if not arquivos:
+            print("Nenhum arquivo PDF encontrado na pasta.")
+            return
+
+        print(f"\nRenomeando arquivos na pasta: {pasta}\n")
+        
+        for arquivo in arquivos:
+            caminho_arquivo = os.path.join(pasta, arquivo)
+            
+            # Extrair informações do PDF
+            data_pagamento, destinatario, valor = extrair_informacoes_pdf(caminho_arquivo)
+            
+            if data_pagamento and destinatario and valor:
+                # Limpar o nome do destinatário para evitar caracteres inválidos
+                destinatario_limpo = limpar_nome_arquivo(destinatario)
+                
+                # Formatar o novo nome do arquivo
+                novo_nome = f"{data_pagamento}_{destinatario_limpo}_{valor}_COMPROVANTE.pdf"
+            else:
+                novo_nome = f"INCOMPLETO_{arquivo}"
+                print(f"Informações incompletas para {arquivo}, renomeado como {novo_nome}")
+
+            caminho_novo = os.path.join(pasta, novo_nome)
+            
+            # Renomear o arquivo
+            try:
+                os.rename(caminho_arquivo, caminho_novo)
+                print(f"Renomeado: {arquivo} -> {novo_nome}")
+            except FileExistsError:
+                print(f"Arquivo já existe: {novo_nome}. Pulei este arquivo.")
+            except Exception as e:
+                print(f"Erro ao renomear {arquivo}: {e}")
+        
+        print("\nRenomeação concluída.")
+    except Exception as e:
+        print(f"Erro ao renomear arquivos: {e}")
+
+def iniciar_programa():
+    """
+    Inicia o programa com um menu interativo.
+    """
+    try:
+        pasta = input("\nDigite o caminho da pasta onde estão os comprovantes: ").strip()
+        if not os.path.isdir(pasta):
+            print("Caminho da pasta inválido. Encerrando o programa.")
+            return
+        
+        renomear_comprovantes(pasta)
+    except Exception as e:
+        print(f"Erro inesperado: {e}")
+    finally:
+        input("\nPressione Enter para encerrar o programa...")
+
+if __name__ == "__main__":
+    iniciar_programa()
