@@ -1,0 +1,80 @@
+import os
+import smtplib
+import pandas as pd
+from email.message import EmailMessage
+from pathlib import Path
+
+def normalizar_nome(nome_maiusculo):
+    return ' '.join(palavra.capitalize() for palavra in nome_maiusculo.strip().split())
+
+def padronizar_cpf(cpf):
+    cpf_str = str(cpf).strip().zfill(11)
+    return cpf_str
+
+def encontrar_pdf(nome, cpf, data, pasta_pdfs):
+    nome_normalizado = normalizar_nome(nome)
+    cpf_formatado = padronizar_cpf(cpf)
+    nome_base = f"{data}_{nome_normalizado} {cpf_formatado}_Recibo de Pagamento.pdf"
+    caminho_pdf = Path(pasta_pdfs) / nome_base
+    return caminho_pdf if caminho_pdf.exists() else None
+
+def enviar_email(destinatario, assunto, corpo, anexo, remetente, senha):
+    msg = EmailMessage()
+    msg["Subject"] = assunto
+    msg["From"] = remetente
+    msg["To"] = destinatario
+    msg.set_content(corpo)
+
+    with open(anexo, "rb") as f:
+        msg.add_attachment(f.read(), maintype="application", subtype="pdf", filename=anexo.name)
+
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+        smtp.login(remetente, senha)
+        smtp.send_message(msg)
+        print(f"📧 E-mail enviado para: {destinatario}")
+
+def main():
+    planilha = input("📄 Digite o caminho da planilha com os colaboradores (.xlsx): ").strip()
+    pasta_pdfs = input("📁 Digite o caminho da pasta com os PDFs renomeados: ").strip()
+    data = input("🗓️ Digite a data usada no nome dos arquivos (formato AAAA.MM.DD): ").strip()
+    remetente = input("📧 Digite o seu e-mail Gmail remetente: ").strip()
+    senha_app = input("🔐 Digite sua senha de aplicativo do Gmail: ").strip()
+
+    try:
+        df = pd.read_excel(planilha)
+
+        testar_um = input("Deseja testar o envio com apenas um e-mail primeiro? (s/n): ").strip().lower() == 's'
+
+        for idx, row in df.iterrows():
+            nome = row.iloc[0]
+            cpf = padronizar_cpf(row.iloc[1])
+            email = row.iloc[2]
+
+            caminho_pdf = encontrar_pdf(nome, cpf, data, pasta_pdfs)
+
+            if caminho_pdf:
+                corpo = f"""
+Olá {normalizar_nome(nome)},
+
+Encaminhamos em anexo seu Recibo de Pagamento referente ao mês informado.
+Agradecemos por sua dedicação ao nosso trabalho coletivo em prol da alfabetização das crianças na idade certa.
+
+Atenciosamente,
+Departameneto Financeiro da Associação Bem Comum
+                """
+                assunto = "Recibo de Pagamento - " + data
+                enviar_email(email, assunto, corpo, caminho_pdf, remetente, senha_app)
+            else:
+                print(f"❌ PDF não encontrado para {nome} - {cpf}")
+
+            if testar_um:
+                print("✅ Envio de teste concluído. Nenhum outro e-mail será enviado.")
+                break
+
+    except Exception as e:
+        print(f"❌ Ocorreu um erro: {e}")
+
+    input("\n✅ Processo finalizado. Pressione Enter para sair...")
+
+if __name__ == "__main__":
+    main()
